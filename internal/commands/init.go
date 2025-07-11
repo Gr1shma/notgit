@@ -9,25 +9,34 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type InitArgs struct {
+	quietMode bool
+	directory string
+}
+
+var initArgs = &InitArgs{}
+
 var initCmd = &cobra.Command{
 	Use:   "init [directory]",
 	Short: "Initialize a new notgit repository",
 	Long:  `Initialize a new notgit repository in the current directory by creating the necessary metadata and configuration files.`,
 
-	Run: initCallback,
+	Args: cobra.MaximumNArgs(1),
+	Run:  initCallback,
 }
 
 func init() {
+	initCmd.Flags().BoolVarP(&initArgs.quietMode, "quiet", "q", false, "supress output messages")
 	rootCmd.AddCommand(initCmd)
 }
 
 func initCallback(cmd *cobra.Command, args []string) {
-	path := "."
+	initArgs.directory = "."
 	if len(args) == 1 {
-		path = args[0]
+		initArgs.directory = args[0]
 	}
 
-	absPath, err := filepath.Abs(path)
+	absPath, err := filepath.Abs(initArgs.directory)
 	if err != nil {
 		fmt.Printf("Error while getting the absolute path: %v\n", err)
 		return
@@ -39,7 +48,9 @@ func initCallback(cmd *cobra.Command, args []string) {
 			fmt.Printf("Error creating directory: %v\n", err)
 			return
 		}
-		fmt.Printf("Created directory: %s\n", absPath)
+		if !initArgs.quietMode {
+			fmt.Printf("Created directory: %s\n", absPath)
+		}
 	} else if err != nil {
 		fmt.Printf("Error accessing path: %v\n", err)
 		return
@@ -53,5 +64,7 @@ func initCallback(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	fmt.Printf("Initialized empty notgit repository in %s/.notgit\n", absPath)
+	if !initArgs.quietMode {
+		fmt.Printf("Initialized empty notgit repository in %s/.notgit\n", absPath)
+	}
 }
