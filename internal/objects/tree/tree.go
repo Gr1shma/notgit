@@ -2,6 +2,8 @@ package tree
 
 import (
 	"bytes"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 
 	"github.com/Gr1shma/notgit/internal/objects"
@@ -43,7 +45,6 @@ func (t *Tree) AddEntry(name, hash string, entryType EntryType) {
 	if existingEntry, exists := t.entryMap[name]; exists {
 		existingEntry.Hash = hash
 		existingEntry.Type = entryType
-		t.Hash = ""
 		return
 	}
 
@@ -54,8 +55,17 @@ func (t *Tree) AddEntry(name, hash string, entryType EntryType) {
 	}
 	t.Entries = append(t.Entries, entry)
 	t.entryMap[name] = &t.Entries[len(t.Entries)-1] // Point to the actual entry in slice
+}
 
-	t.Hash = ""
+func (t *Tree) GetEntry(name string) *Entry {
+	if entry, exists := t.entryMap[name]; exists {
+		return entry
+	}
+	return nil
+}
+
+func (t *Tree) Size() int {
+	return len(t.Entries)
 }
 
 func (t *Tree) Serialize() ([]byte, error) {
@@ -77,6 +87,16 @@ func (t *Tree) Serialize() ([]byte, error) {
 
 func DeserializeTree(data []byte) (*Tree, error) {
 	return nil, nil
+}
+
+func (t *Tree) ComputeHash() error {
+	serialized, err := t.Serialize()
+	if err != nil {
+		return err
+	}
+	hash := sha1.Sum(serialized)
+	t.Hash = hex.EncodeToString(hash[:])
+	return nil
 }
 
 func (t *Tree) GetHash() string {
