@@ -1,6 +1,7 @@
 package tree_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/Gr1shma/notgit/internal/objects/blob"
@@ -116,4 +117,28 @@ func TestAddEntry_MultipleEntries(t *testing.T) {
 	// Compute hash for parent tree
 	require.NoError(t, newTree.ComputeHash())
 	require.Len(t, newTree.GetHash(), 40)
+}
+
+func TestTreeSerialize(t *testing.T) {
+	// Create a new empty tree
+	newTree := tree.NewTree()
+	require.Equal(t, 0, newTree.Size(), "New tree should be empty")
+
+	// Create a blob to add to the tree
+	b, err := blob.NewBlob([]byte("Hello World"))
+	require.NoError(t, err, "Creating blob should not fail")
+	require.NotNil(t, b, "Blob should not be nil")
+
+	// Add the blob entry to the tree
+	newTree.AddEntry("hello.txt", b.Hash, tree.EntryTypeBlob)
+
+	// Serialize the tree
+	serialized, err := newTree.Serialize()
+	require.NoError(t, err, "Serialization should not fail")
+	require.NotEmpty(t, serialized, "Serialized output should not be empty")
+
+	// Check if it contains the expected format
+	// Format: "<mode> <type> <hash>\t<name>\n"
+	expectedFragment := fmt.Sprintf("100644 blob %s\thello.txt\n", b.Hash)
+	require.Contains(t, string(serialized), expectedFragment, "Serialized tree should contain expected entry line")
 }
