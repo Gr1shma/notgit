@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/Gr1shma/notgit/internal/utils"
 )
 
 func CreateRepo(basePath string) error {
@@ -23,13 +25,12 @@ func CreateRepo(basePath string) error {
 	headPath := filepath.Join(repoPath, "HEAD")
 	headFileContent := []byte("ref: refs/heads/master\n")
 
-	// 0o644 -> (-rw-r--r--)
-	if err := os.WriteFile(headPath, headFileContent, 0o644); err != nil {
+	if err := utils.WriteFile(headPath, headFileContent, nil); err != nil {
 		return fmt.Errorf("Error while writing content in HEAD: %w", err)
 	}
 
 	configPath := filepath.Join(repoPath, "config")
-	if err := os.WriteFile(configPath, []byte{}, 0o644); err != nil {
+	if err := utils.WriteFile(configPath, []byte{}, nil); err != nil {
 		return fmt.Errorf("Error while creating config file: %w", err)
 	}
 
