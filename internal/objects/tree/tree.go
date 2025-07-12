@@ -1,6 +1,7 @@
 package tree
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/sha1"
 	"encoding/hex"
@@ -86,7 +87,42 @@ func (t *Tree) Serialize() ([]byte, error) {
 }
 
 func DeserializeTree(data []byte) (*Tree, error) {
-	return nil, nil
+	tree := NewTree()
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+
+		parts := bytes.SplitN(line, []byte("\t"), 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid tree entry format: %q", line)
+		}
+
+		meta := string(parts[0])
+		name := string(parts[1])
+
+		var mode, typeStr, hash string
+		_, err := fmt.Sscanf(meta, "%s %s %s", &mode, &typeStr, &hash)
+		if err != nil {
+			return nil, fmt.Errorf("invalid tree metadata: %q", meta)
+		}
+
+		if !isValidMode(mode) {
+			return nil, fmt.Errorf("invalid entry mode: %s", mode)
+		}
+
+		entryType, err := parseEntryType(typeStr)
+		if err != nil {
+			return nil, err
+		}
+
+		tree.AddEntry(name, hash, entryType)
+	}
+
+	return tree, nil
 }
 
 func (t *Tree) ComputeHash() error {
@@ -101,6 +137,10 @@ func (t *Tree) ComputeHash() error {
 
 func (t *Tree) GetHash() string {
 	return t.Hash
+}
+
+func isValidMode(mode string) bool {
+	return mode == "100644" || mode == "040000"
 }
 
 func (t *Tree) getModeForType(entryType EntryType) string {
@@ -122,5 +162,16 @@ func (t *Tree) getTypeString(entryType EntryType) string {
 		return "tree"
 	default:
 		return "blob"
+	}
+}
+
+func parseEntryType(typeStr string) (EntryType, error) {
+	switch typeStr {
+	case "blob":
+		return EntryTypeBlob, nil
+	case "tree":
+		return EntryTypeTree, nil
+	default:
+		return 0, fmt.Errorf("invalid entry type: %s", typeStr)
 	}
 }
