@@ -22,7 +22,7 @@ var configArgs = &ConfigArgs{}
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Get and set repository or global options",
-	Long: "Manage configuration values for notgit, including user identity, editor, and default branch.",
+	Long:  "Manage configuration values for notgit, including user identity, editor, and default branch.",
 }
 
 var configGetCmd = &cobra.Command{
@@ -89,7 +89,27 @@ func loadConfig() (*ini.File, string, error) {
 }
 
 func getConfigCallback(cmd *cobra.Command, args []string) {
-	fmt.Println("get config called")
+	key := args[0]
+
+	configData, _, err := loadConfig()
+	if err != nil {
+		fmt.Printf("Error loading config: %v\n", err)
+		return
+	}
+
+	section, subkey, err := splitKey(key)
+	if err != nil {
+		fmt.Printf("Invalid config key: %v\n", err)
+		return
+	}
+
+	value := configData.Section(section).Key(subkey).String()
+	if value == "" {
+		fmt.Printf("Key %s not set.\n", key)
+		return
+	}
+
+	fmt.Println(value)
 }
 
 func setConfigCallback(cmd *cobra.Command, args []string) {
@@ -115,7 +135,27 @@ func setConfigCallback(cmd *cobra.Command, args []string) {
 }
 
 func listConfigCallback(cmd *cobra.Command, args []string) {
-	fmt.Println("list config called")
+	configData, configPath, err := loadConfig()
+	if err != nil {
+		fmt.Printf("Error loading config: %v\n", err)
+		return
+	}
+
+	fmt.Printf("Listing configuration from: %s\n\n", configPath)
+
+	for _, section := range configData.Sections() {
+		if section.Name() == ini.DefaultSection && len(section.Keys()) == 0 {
+			continue
+		}
+
+		for _, key := range section.Keys() {
+			if section.Name() == ini.DefaultSection {
+				fmt.Printf("%s = %s\n", key.Name(), key.Value())
+			} else {
+				fmt.Printf("%s.%s = %s\n", section.Name(), key.Name(), key.Value())
+			}
+		}
+	}
 }
 
 type ConfigKeyInfo struct {
