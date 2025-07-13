@@ -39,6 +39,13 @@ var configSetCmd = &cobra.Command{
 	Run:   setConfigCallback,
 }
 
+var configUnsetCmd = &cobra.Command{
+	Use:   "unset <key> [<key>...]",
+	Short: "Remove one or more configuration values",
+	Args:  cobra.MinimumNArgs(1),
+	Run:   unsetConfigCallback,
+}
+
 var configListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all configuration values",
@@ -50,6 +57,7 @@ func init() {
 	configCmd.AddCommand(configGetCmd)
 	configCmd.AddCommand(configSetCmd)
 	configCmd.AddCommand(configListCmd)
+	configCmd.AddCommand(configUnsetCmd)
 
 	configCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
 		cmd.Root().HelpFunc()(cmd, args)
@@ -134,6 +142,47 @@ func setConfigCallback(cmd *cobra.Command, args []string) {
 	fmt.Printf("set %s = %s\n", key, value)
 }
 
+func unsetConfigCallback(cmd *cobra.Command, args []string) {
+	configData, configPath, err := loadConfig()
+	if err != nil {
+		fmt.Printf("Error loading config: %v\n", err)
+		return
+	}
+
+	var anyUnset bool
+
+	for _, key := range args {
+		section, subkey, err := splitKey(key)
+		if err != nil {
+			fmt.Printf("Invalid config key %q: %v\n", key, err)
+			continue
+		}
+
+		sec := configData.Section(section)
+		if sec == nil || !sec.HasKey(subkey) {
+			fmt.Printf("Key %s is not set.\n", key)
+			continue
+		}
+
+		sec.DeleteKey(subkey)
+		fmt.Printf("Unset key: %s\n", key)
+		anyUnset = true
+
+		if len(sec.Keys()) == 0 && !strings.EqualFold(sec.Name(), ini.DefaultSection) {
+			configData.DeleteSection(section)
+			fmt.Printf("Removed empty section: [%s]\n", section)
+		}
+	}
+
+	if anyUnset {
+		if err := configData.SaveTo(configPath); err != nil {
+			fmt.Printf("Failed to save config: %v\n", err)
+		}
+	} else {
+		fmt.Println("No keys were unset.")
+	}
+}
+
 func listConfigCallback(cmd *cobra.Command, args []string) {
 	configData, configPath, err := loadConfig()
 	if err != nil {
@@ -144,16 +193,12 @@ func listConfigCallback(cmd *cobra.Command, args []string) {
 	fmt.Printf("Listing configuration from: %s\n\n", configPath)
 
 	for _, section := range configData.Sections() {
-		if section.Name() == ini.DefaultSection && len(section.Keys()) == 0 {
+		if strings.EqualFold(section.Name(), ini.DefaultSection) {
 			continue
 		}
 
 		for _, key := range section.Keys() {
-			if section.Name() == ini.DefaultSection {
-				fmt.Printf("%s = %s\n", key.Name(), key.Value())
-			} else {
-				fmt.Printf("%s.%s = %s\n", section.Name(), key.Name(), key.Value())
-			}
+			fmt.Printf("%s.%s = %s\n", section.Name(), key.Name(), key.Value())
 		}
 	}
 }
@@ -190,6 +235,10 @@ func splitKey(key string) (section string, subkey string, err error) {
 	}
 
 	section, subkey = parts[0], parts[1]
+
+	if strings.EqualFold(section, ini.DefaultSection) {
+		return "", "", fmt.Errorf("section %q is reserved and not allowed", section)
+	}
 
 	subkeys, ok := configSchema[section]
 	if !ok {
