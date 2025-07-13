@@ -9,33 +9,57 @@ import (
 	"gopkg.in/ini.v1"
 )
 
-func LoadConfig() (*ini.File, string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, "", fmt.Errorf("error getting current working directory: %w", err)
-	}
+func LoadConfig(useGlobal bool) (*ini.File, string, error) {
+	var configPath string
 
-	rootRepoPath, err := FindRepoRoot(cwd)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, "", fmt.Errorf("not inside a notgit repository")
+	if useGlobal {
+		configDir := os.Getenv("XDG_CONFIG_HOME")
+		if configDir == "" {
+			configDir = filepath.Join(os.Getenv("HOME"), ".config")
 		}
-		return nil, "", fmt.Errorf("error locating notgit repository: %w", err)
+
+		absConfigDir, err := filepath.Abs(configDir)
+		if err != nil {
+			return nil, "", fmt.Errorf("error resolving config directory: %w", err)
+		}
+
+		globalConfigDir := filepath.Join(absConfigDir, "notgit")
+		configPath = filepath.Join(globalConfigDir, "config")
+
+		if err := os.MkdirAll(globalConfigDir, 0o755); err != nil {
+			return nil, "", fmt.Errorf("failed to create config directory: %w", err)
+		}
+
+		if _, err := os.Stat(configPath); os.IsNotExist(err) {
+			file, err := os.Create(configPath)
+			if err != nil {
+				return nil, "", fmt.Errorf("failed to create config file: %w", err)
+			}
+			file.Close()
+		}
+	} else {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, "", fmt.Errorf("error getting current working directory: %w", err)
+		}
+
+		rootRepoPath, err := FindRepoRoot(cwd)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, "", fmt.Errorf("not inside a notgit repository")
+			}
+			return nil, "", fmt.Errorf("error locating notgit repository: %w", err)
+		}
+
+		configPath = filepath.Join(rootRepoPath, ".notgit", "config")
 	}
 
-	repoConfigPath := filepath.Join(rootRepoPath, ".notgit", "config")
-
-	configRawContent, err := ReadFile(repoConfigPath)
+	configData, err := ini.Load(configPath)
 	if err != nil {
-		return nil, "", fmt.Errorf("error reading .notgit/config: %w", err)
+		return nil, "", fmt.Errorf("failed to load config file %s: %w", configPath, err)
 	}
 
-	configData, err := ini.Load(configRawContent)
-	if err != nil {
-		return nil, "", fmt.Errorf("invalid format in .notgit/config: %w", err)
-	}
-
-	return configData, repoConfigPath, nil
+	return configData, configPath, nil
 }
 
 type ConfigKeyInfo struct {

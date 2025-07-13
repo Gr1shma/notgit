@@ -2,17 +2,14 @@ package commands
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 
 	"github.com/Gr1shma/notgit/internal/utils"
 	"github.com/spf13/cobra"
 )
 
-type ConfigArgs struct {
-	userName  string
-	userEmail string
-}
-
-var configArgs = &ConfigArgs{}
+var globalConfigFlag bool
 
 var configCmd = &cobra.Command{
 	Use:   "config",
@@ -48,11 +45,20 @@ var configListCmd = &cobra.Command{
 	Run:   listConfigCallback,
 }
 
+var configEditCmd = &cobra.Command{
+	Use:   "edit",
+	Short: "Open the config file in the editor",
+	Args:  cobra.NoArgs,
+	Run:   editConfigCallback,
+}
+
 func init() {
+	configCmd.PersistentFlags().BoolVarP(&globalConfigFlag, "global", "g", false, "Use global configuration file")
+	configCmd.AddCommand(configListCmd)
 	configCmd.AddCommand(configGetCmd)
 	configCmd.AddCommand(configSetCmd)
-	configCmd.AddCommand(configListCmd)
 	configCmd.AddCommand(configUnsetCmd)
+	configCmd.AddCommand(configEditCmd)
 
 	configCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
 		cmd.Root().HelpFunc()(cmd, args)
@@ -65,7 +71,7 @@ func init() {
 func getConfigCallback(cmd *cobra.Command, args []string) {
 	key := args[0]
 
-	cfg, _, err := utils.LoadConfig()
+	cfg, _, err := utils.LoadConfig(globalConfigFlag)
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
 		return
@@ -85,7 +91,7 @@ func setConfigCallback(cmd *cobra.Command, args []string) {
 	key := args[0]
 	value := args[1]
 
-	cfg, path, err := utils.LoadConfig()
+	cfg, path, err := utils.LoadConfig(globalConfigFlag)
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
 		return
@@ -106,7 +112,7 @@ func setConfigCallback(cmd *cobra.Command, args []string) {
 }
 
 func unsetConfigCallback(cmd *cobra.Command, args []string) {
-	cfg, path, err := utils.LoadConfig()
+	cfg, path, err := utils.LoadConfig(globalConfigFlag)
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
 		return
@@ -131,7 +137,7 @@ func unsetConfigCallback(cmd *cobra.Command, args []string) {
 }
 
 func listConfigCallback(cmd *cobra.Command, args []string) {
-	cfg, path, err := utils.LoadConfig()
+	cfg, path, err := utils.LoadConfig(globalConfigFlag)
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
 		return
@@ -139,4 +145,42 @@ func listConfigCallback(cmd *cobra.Command, args []string) {
 
 	fmt.Printf("Listing configuration from: %s\n\n", path)
 	utils.PrintAllConfig(cfg)
+}
+
+func editConfigCallback(cmd *cobra.Command, args []string) {
+	cfg, configPath, err := utils.LoadConfig(globalConfigFlag)
+	if err != nil {
+		fmt.Printf("Error loading config: %v\n", err)
+		return
+	}
+
+	editor, err := utils.GetConfigKeyValue(cfg, "core.editor")
+	if err != nil || editor == "" {
+		editor = os.Getenv("EDITOR")
+	}
+
+	if editor == "" {
+		fmt.Println("No editor configured. Set core.editor or $EDITOR environment variable.")
+		return
+	}
+
+	tryEditor := func(ed string) error {
+		cmdExec := exec.Command(ed, configPath)
+		cmdExec.Stdin = os.Stdin
+		cmdExec.Stdout = os.Stdout
+		cmdExec.Stderr = os.Stderr
+		return cmdExec.Run()
+	}
+
+	if err := tryEditor(editor); err != nil {
+		fallbackEditor := os.Getenv("EDITOR")
+		if fallbackEditor != "" && fallbackEditor != editor {
+			fmt.Printf("Failed to open editor %q, falling back to $EDITOR=%q\n", editor, fallbackEditor)
+			if err := tryEditor(fallbackEditor); err != nil {
+				fmt.Printf("Failed to open fallback editor: %v\n", err)
+			}
+		} else {
+			fmt.Printf("Failed to open editor: %v\n", err)
+		}
+	}
 }
