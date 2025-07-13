@@ -61,51 +61,24 @@ func init() {
 
 	configCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
 		cmd.Root().HelpFunc()(cmd, args)
-		fmt.Print(printSupportedConfigKeys())
+		fmt.Print(utils.PrintSupportedConfigKeys())
 	})
 
 	rootCmd.AddCommand(configCmd)
 }
 
-func loadConfig() (*ini.File, string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, "", fmt.Errorf("error getting current working directory: %w", err)
-	}
 
-	rootRepoPath, err := repository.FindRepoRoot(cwd)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, "", fmt.Errorf("not inside a notgit repository")
-		}
-		return nil, "", fmt.Errorf("error locating notgit repository: %w", err)
-	}
-
-	repoConfigPath := filepath.Join(rootRepoPath, ".notgit", "config")
-
-	configRawContent, err := utils.ReadFile(repoConfigPath)
-	if err != nil {
-		return nil, "", fmt.Errorf("error reading .notgit/config: %w", err)
-	}
-
-	configData, err := ini.Load(configRawContent)
-	if err != nil {
-		return nil, "", fmt.Errorf("invalid format in .notgit/config: %w", err)
-	}
-
-	return configData, repoConfigPath, nil
-}
 
 func getConfigCallback(cmd *cobra.Command, args []string) {
 	key := args[0]
 
-	configData, _, err := loadConfig()
+	configData, _, err := utils.LoadConfig()
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
 		return
 	}
 
-	section, subkey, err := splitKey(key)
+	section, subkey, err := utils.SplitKey(key)
 	if err != nil {
 		fmt.Printf("Invalid config key: %v\n", err)
 		return
@@ -123,13 +96,13 @@ func getConfigCallback(cmd *cobra.Command, args []string) {
 func setConfigCallback(cmd *cobra.Command, args []string) {
 	key := args[0]
 	value := args[1]
-	section, subkey, err := splitKey(key)
+	section, subkey, err := utils.SplitKey(key)
 	if err != nil {
 		fmt.Printf("Error while splitting the keys: %v\n", err)
 		return
 	}
 
-	configData, configPath, err := loadConfig()
+	configData, configPath, err := utils.LoadConfig()
 	if err != nil {
 		fmt.Printf("Error while loading config: %v\n", err)
 		return
@@ -143,7 +116,7 @@ func setConfigCallback(cmd *cobra.Command, args []string) {
 }
 
 func unsetConfigCallback(cmd *cobra.Command, args []string) {
-	configData, configPath, err := loadConfig()
+	configData, configPath, err := utils.LoadConfig()
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
 		return
@@ -152,7 +125,7 @@ func unsetConfigCallback(cmd *cobra.Command, args []string) {
 	var anyUnset bool
 
 	for _, key := range args {
-		section, subkey, err := splitKey(key)
+		section, subkey, err := utils.SplitKey(key)
 		if err != nil {
 			fmt.Printf("Invalid config key %q: %v\n", key, err)
 			continue
@@ -184,7 +157,7 @@ func unsetConfigCallback(cmd *cobra.Command, args []string) {
 }
 
 func listConfigCallback(cmd *cobra.Command, args []string) {
-	configData, configPath, err := loadConfig()
+	configData, configPath, err := utils.LoadConfig()
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
 		return
@@ -201,65 +174,4 @@ func listConfigCallback(cmd *cobra.Command, args []string) {
 			fmt.Printf("%s.%s = %s\n", section.Name(), key.Name(), key.Value())
 		}
 	}
-}
-
-type ConfigKeyInfo struct {
-	Description string
-}
-
-var configSchema = map[string]map[string]ConfigKeyInfo{
-	"user": {
-		"name": {
-			Description: "User's name (e.g., Grishma Dhakal)",
-		},
-		"email": {
-			Description: "User's email address (e.g., grishma@example.com)",
-		},
-	},
-	"core": {
-		"editor": {
-			Description: "Default text editor (e.g., vim, nvim, nano)",
-		},
-	},
-	"init": {
-		"defaultBranch": {
-			Description: "Default branch name for new repositories (e.g., main)",
-		},
-	},
-}
-
-func splitKey(key string) (section string, subkey string, err error) {
-	parts := strings.SplitN(key, ".", 2)
-	if len(parts) != 2 {
-		return "", "", fmt.Errorf("invalid key format: %q (expected section.key)", key)
-	}
-
-	section, subkey = parts[0], parts[1]
-
-	if strings.EqualFold(section, ini.DefaultSection) {
-		return "", "", fmt.Errorf("section %q is reserved and not allowed", section)
-	}
-
-	subkeys, ok := configSchema[section]
-	if !ok {
-		return "", "", fmt.Errorf("unsupported section: %s", section)
-	}
-
-	if _, ok := subkeys[subkey]; !ok {
-		return "", "", fmt.Errorf("unsupported key: %s.%s", section, subkey)
-	}
-
-	return section, subkey, nil
-}
-
-func printSupportedConfigKeys() string {
-	var sb strings.Builder
-	sb.WriteString("\nSupported configuration keys:\n")
-	for section, keys := range configSchema {
-		for key, info := range keys {
-			sb.WriteString(fmt.Sprintf("  %s.%s\t- %s\n", section, key, info.Description))
-		}
-	}
-	sb.WriteString("\n")
-	return sb.String()
 }
