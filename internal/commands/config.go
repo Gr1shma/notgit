@@ -2,14 +2,9 @@ package commands
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 
-	"github.com/Gr1shma/notgit/internal/repository"
 	"github.com/Gr1shma/notgit/internal/utils"
 	"github.com/spf13/cobra"
-	"gopkg.in/ini.v1"
 )
 
 type ConfigArgs struct {
@@ -67,111 +62,81 @@ func init() {
 	rootCmd.AddCommand(configCmd)
 }
 
-
-
 func getConfigCallback(cmd *cobra.Command, args []string) {
 	key := args[0]
 
-	configData, _, err := utils.LoadConfig()
+	cfg, _, err := utils.LoadConfig()
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
 		return
 	}
 
-	section, subkey, err := utils.SplitKey(key)
+	val, err := utils.GetConfigKeyValue(cfg, key)
 	if err != nil {
-		fmt.Printf("Invalid config key: %v\n", err)
+		fmt.Println(err)
 		return
 	}
 
-	value := configData.Section(section).Key(subkey).String()
-	if value == "" {
-		fmt.Printf("Key %s not set.\n", key)
-		return
-	}
+	fmt.Println(val)
 
-	fmt.Println(value)
 }
 
 func setConfigCallback(cmd *cobra.Command, args []string) {
 	key := args[0]
 	value := args[1]
-	section, subkey, err := utils.SplitKey(key)
+
+	cfg, path, err := utils.LoadConfig()
 	if err != nil {
-		fmt.Printf("Error while splitting the keys: %v\n", err)
+		fmt.Printf("Error loading config: %v\n", err)
 		return
 	}
 
-	configData, configPath, err := utils.LoadConfig()
+	err = utils.SetConfigKeyValue(cfg, path, key, value)
 	if err != nil {
-		fmt.Printf("Error while loading config: %v\n", err)
+		fmt.Printf("Error setting config: %v\n", err)
 		return
 	}
 
-	configData.Section(section).Key(subkey).SetValue(value)
-	if err := configData.SaveTo(configPath); err != nil {
-		fmt.Printf("failed to save config: %v", err)
+	if err := cfg.SaveTo(path); err != nil {
+		fmt.Printf("Failed to save config: %v\n", err)
+		return
 	}
-	fmt.Printf("set %s = %s\n", key, value)
+
+	fmt.Printf("Set %s = %s\n", key, value)
 }
 
 func unsetConfigCallback(cmd *cobra.Command, args []string) {
-	configData, configPath, err := utils.LoadConfig()
+	cfg, path, err := utils.LoadConfig()
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
 		return
 	}
 
 	var anyUnset bool
-
 	for _, key := range args {
-		section, subkey, err := utils.SplitKey(key)
+		keySetUnsetBool, err := utils.UnsetConfigKey(cfg, path, key)
 		if err != nil {
-			fmt.Printf("Invalid config key %q: %v\n", key, err)
+			fmt.Printf("Error unsetting key %s: %v\n", key, err)
 			continue
 		}
-
-		sec := configData.Section(section)
-		if sec == nil || !sec.HasKey(subkey) {
-			fmt.Printf("Key %s is not set.\n", key)
-			continue
-		}
-
-		sec.DeleteKey(subkey)
 		fmt.Printf("Unset key: %s\n", key)
-		anyUnset = true
-
-		if len(sec.Keys()) == 0 && !strings.EqualFold(sec.Name(), ini.DefaultSection) {
-			configData.DeleteSection(section)
-			fmt.Printf("Removed empty section: [%s]\n", section)
-		}
+		anyUnset = keySetUnsetBool
 	}
 
 	if anyUnset {
-		if err := configData.SaveTo(configPath); err != nil {
+		if err := cfg.SaveTo(path); err != nil {
 			fmt.Printf("Failed to save config: %v\n", err)
 		}
-	} else {
-		fmt.Println("No keys were unset.")
 	}
 }
 
 func listConfigCallback(cmd *cobra.Command, args []string) {
-	configData, configPath, err := utils.LoadConfig()
+	cfg, path, err := utils.LoadConfig()
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
 		return
 	}
 
-	fmt.Printf("Listing configuration from: %s\n\n", configPath)
-
-	for _, section := range configData.Sections() {
-		if strings.EqualFold(section.Name(), ini.DefaultSection) {
-			continue
-		}
-
-		for _, key := range section.Keys() {
-			fmt.Printf("%s.%s = %s\n", section.Name(), key.Name(), key.Value())
-		}
-	}
+	fmt.Printf("Listing configuration from: %s\n\n", path)
+	utils.PrintAllConfig(cfg)
 }

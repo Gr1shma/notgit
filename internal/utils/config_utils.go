@@ -63,7 +63,7 @@ var configSchema = map[string]map[string]ConfigKeyInfo{
 	},
 }
 
-func SplitKey(key string) (section string, subkey string, err error) {
+func SplitConfigKey(key string) (section string, subkey string, err error) {
 	parts := strings.SplitN(key, ".", 2)
 	if len(parts) != 2 {
 		return "", "", fmt.Errorf("invalid key format: %q (expected section.key)", key)
@@ -97,4 +97,71 @@ func PrintSupportedConfigKeys() string {
 	}
 	sb.WriteString("\n")
 	return sb.String()
+}
+
+func SaveConfig(cfg *ini.File, path string) error {
+	return cfg.SaveTo(path)
+}
+
+func GetConfigKeyValue(cfg *ini.File, key string) (string, error) {
+	section, subkey, err := SplitConfigKey(key)
+	if err != nil {
+		return "", err
+	}
+	val := cfg.Section(section).Key(subkey).String()
+	if val == "" {
+		return "", fmt.Errorf("key %s not set", key)
+	}
+	return val, nil
+}
+
+func SetConfigKeyValue(cfg *ini.File, path, key, value string) error {
+	section, subkey, err := SplitConfigKey(key)
+	if err != nil {
+		return err
+	}
+
+	cfg.Section(section).Key(subkey).SetValue(value)
+
+	return SaveConfig(cfg, path)
+}
+
+func UnsetConfigKey(cfg *ini.File, path, key string) (bool, error) {
+	section, subkey, err := SplitConfigKey(key)
+	if err != nil {
+		return false, err
+	}
+
+	sec := cfg.Section(section)
+	if sec == nil || !sec.HasKey(subkey) {
+		return false, fmt.Errorf("key %s is not set", key)
+	}
+
+	sec.DeleteKey(subkey)
+
+	// Remove section if empty and not default
+	if len(sec.Keys()) == 0 && sec.Name() != ini.DefaultSection {
+		cfg.DeleteSection(section)
+	}
+
+	if err := SaveConfig(cfg, path); err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+func PrintAllConfig(cfg *ini.File) {
+	for _, section := range cfg.Sections() {
+		if section.Name() == ini.DefaultSection && len(section.Keys()) == 0 {
+			continue
+		}
+		for _, key := range section.Keys() {
+			if section.Name() == ini.DefaultSection {
+				fmt.Printf("%s = %s\n", key.Name(), key.Value())
+			} else {
+				fmt.Printf("%s.%s = %s\n", section.Name(), key.Name(), key.Value())
+			}
+		}
+	}
 }
