@@ -38,7 +38,7 @@ func TestStoreBlobObject(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, expectedHashStr, hashStr)
 
-	objPath := filepath.Join(repo.GitDir, "objects", hashStr[:2], hashStr[2:])
+	objPath := filepath.Join(repo.NotgitDir, "objects", hashStr[:2], hashStr[2:])
 	_, err = os.Stat(objPath)
 	require.NoError(t, err, "object file should exist")
 
@@ -81,7 +81,7 @@ func TestStoreTreeObject(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, hash)
 
-	objPath := filepath.Join(repo.GitDir, "objects", hash[:2], hash[2:])
+	objPath := filepath.Join(repo.NotgitDir, "objects", hash[:2], hash[2:])
 	_, err = os.Stat(objPath)
 	require.NoError(t, err)
 }
@@ -119,7 +119,7 @@ func TestStoreCommitObject(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, c.Hash, hash)
 
-	objPath := filepath.Join(repo.GitDir, "objects", hash[:2], hash[2:])
+	objPath := filepath.Join(repo.NotgitDir, "objects", hash[:2], hash[2:])
 	_, err = os.Stat(objPath)
 	require.NoError(t, err)
 }

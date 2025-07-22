@@ -9,8 +9,8 @@ import (
 )
 
 type Repository struct {
-	BaseDir string
-	GitDir  string
+	BaseDir   string
+	NotgitDir string
 }
 
 func CreateRepo(basePath string) error {
@@ -30,12 +30,12 @@ func CreateRepo(basePath string) error {
 	headPath := filepath.Join(repoPath, "HEAD")
 	headFileContent := []byte("ref: refs/heads/master\n")
 
-	if err := utils.WriteFile(headPath, headFileContent, nil); err != nil {
+	if err := os.WriteFile(headPath, headFileContent, 0o644); err != nil {
 		return fmt.Errorf("error while writing content in HEAD: %w", err)
 	}
 
 	configPath := filepath.Join(repoPath, "config")
-	if err := utils.WriteFile(configPath, []byte{}, nil); err != nil {
+	if err := os.WriteFile(configPath, []byte{}, 0o644); err != nil {
 		return fmt.Errorf("error while creating config file: %w", err)
 	}
 
@@ -50,6 +50,6 @@ func OpenRepository(startPath string) (*Repository, error) {
 
 	return &Repository{
 		BaseDir: repoRoot,
-		GitDir:  filepath.Join(repoRoot, ".notgit"),
+		NotgitDir:  filepath.Join(repoRoot, ".notgit"),
 	}, nil
 }

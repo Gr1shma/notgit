@@ -19,7 +19,7 @@ func (r *Repository) StoreObject(obj objects.Object) (string, error) {
 	hash := sha1.Sum(data)
 	hashStr := hex.EncodeToString(hash[:])
 
-	dir := filepath.Join(r.GitDir, "objects", hashStr[:2])
+	dir := filepath.Join(r.NotgitDir, "objects", hashStr[:2])
 	file := filepath.Join(dir, hashStr[2:])
 
 	if _, err := os.Stat(file); err == nil {
