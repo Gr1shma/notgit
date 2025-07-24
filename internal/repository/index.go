@@ -21,15 +21,19 @@ func NewIndex() *Index {
 }
 
 func (r *Repository) IndexPath() string {
-	return filepath.Join(r.NotgitDir, "index")
+	return filepath.Join(r.NotgitDir, "index.json")
 }
 
 func (r *Repository) LoadIndex() (*Index, error) {
 	indexPath := r.IndexPath()
 	data, err := os.ReadFile(indexPath)
 	if err != nil {
-		if os.ErrNotExist == err {
-			return nil, fmt.Errorf("error index file doesn't exist: %w", err)
+		if os.IsNotExist(err) {
+			idx := NewIndex()
+			if err := r.SaveIndex(idx); err != nil {
+				return nil, fmt.Errorf("failed to create new index file: %w", err)
+			}
+			return idx, nil
 		}
 		return nil, fmt.Errorf("failed to read index: %w", err)
 	}
