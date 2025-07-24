@@ -4,21 +4,26 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Gr1shma/notgit/internal/objects/blob"
 	"github.com/Gr1shma/notgit/internal/repository"
 	"github.com/spf13/cobra"
 )
 
+var addVerboseBool bool
+
 var addCmd = &cobra.Command{
 	Use:   "add [path]",
 	Short: "Add file contents to the index",
 	Long:  `Add file contents to the index by storing them as blob objects in .notgit/objects.`,
+	Args:  cobra.MinimumNArgs(1),
 
 	Run: addCallback,
 }
 
 func init() {
+	addCmd.PersistentFlags().BoolVarP(&addVerboseBool, "verbose", "v", false, "Use verbose output to show added files")
 	rootCmd.AddCommand(addCmd)
 }
 
@@ -47,6 +52,15 @@ func addCallback(cmd *cobra.Command, args []string) {
 			return err
 		}
 		if info.IsDir() {
+			if path == repo.NotgitDir {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		absNotgit, _ := filepath.Abs(repo.NotgitDir)
+		absPath, _ := filepath.Abs(path)
+		if strings.HasPrefix(absPath, absNotgit+string(os.PathSeparator)) || absPath == absNotgit {
 			return nil
 		}
 
@@ -68,7 +82,9 @@ func addCallback(cmd *cobra.Command, args []string) {
 		rel, _ := filepath.Rel(".", path)
 		index.AddEntry(rel, hash)
 
-		fmt.Printf("added %s (%s)\n", rel, hash)
+		if addVerboseBool {
+			fmt.Printf("added %s (%s)\n", rel, hash)
+		}
 
 		return nil
 	})
@@ -77,7 +93,7 @@ func addCallback(cmd *cobra.Command, args []string) {
 		fmt.Printf("error while adding: %v\n", err)
 		return
 	}
-	if  err := repo.SaveIndex(index); err != nil {
+	if err := repo.SaveIndex(index); err != nil {
 		fmt.Printf("error saving the index: %s", err)
 	}
 }
