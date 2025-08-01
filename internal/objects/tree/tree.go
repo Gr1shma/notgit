@@ -69,7 +69,7 @@ func (t *Tree) Size() int {
 	return len(t.Entries)
 }
 
-func (t *Tree) Serialize() ([]byte, error) {
+func (t *Tree) SerializeContent() ([]byte, error) {
 	var buffer bytes.Buffer
 	for _, entry := range t.Entries {
 		mode := t.getModeForType(entry.Type)
@@ -86,7 +86,38 @@ func (t *Tree) Serialize() ([]byte, error) {
 	return buffer.Bytes(), nil
 }
 
+func (t *Tree) Serialize() ([]byte, error) {
+	content, err := t.SerializeContent()
+	if err != nil {
+		return nil, err
+	}
+
+	header := fmt.Sprintf("tree %d\x00", len(content))
+	full := append([]byte(header), content...)
+	return full, nil
+}
+
 func DeserializeTree(data []byte) (*Tree, error) {
+	if bytes.Contains(data, []byte{0}) {
+		nullIndex := bytes.IndexByte(data, 0)
+		if nullIndex == -1 {
+			return nil, fmt.Errorf("invalid tree format: missing null byte separator")
+		}
+
+		header := string(data[:nullIndex])
+		content := data[nullIndex+1:]
+
+		if !bytes.HasPrefix([]byte(header), []byte("tree ")) {
+			return nil, fmt.Errorf("not a tree object: %s", header)
+		}
+
+		return parseTreeContent(content)
+	} else {
+		return parseTreeContent(data)
+	}
+}
+
+func parseTreeContent(data []byte) (*Tree, error) {
 	tree := NewTree()
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 
