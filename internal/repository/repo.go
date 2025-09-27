@@ -27,8 +27,16 @@ func CreateRepo(basePath string) error {
 		}
 	}
 
+	cfg, _, _ := utils.LoadConfig(true)
+	defaultBranch := "master"
+	if cfg != nil {
+		if branchName, err := utils.GetConfigKeyValue(cfg, "init.defaultBranch"); err == nil {
+			defaultBranch = branchName
+		}
+	}
+
 	headPath := filepath.Join(repoPath, "HEAD")
-	headFileContent := []byte("ref: refs/heads/master\n")
+	headFileContent := []byte("ref: refs/heads/" + defaultBranch + "\n")
 
 	if err := os.WriteFile(headPath, headFileContent, 0o644); err != nil {
 		return fmt.Errorf("error while writing content in HEAD: %w", err)
@@ -49,7 +57,7 @@ func OpenRepository(startPath string) (*Repository, error) {
 	}
 
 	return &Repository{
-		BaseDir: repoRoot,
-		NotgitDir:  filepath.Join(repoRoot, ".notgit"),
+		BaseDir:   repoRoot,
+		NotgitDir: filepath.Join(repoRoot, ".notgit"),
 	}, nil
 }

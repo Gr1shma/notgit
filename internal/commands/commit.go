@@ -41,8 +41,8 @@ func commitCallback(cmd *cobra.Command, args []string) {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		fmt.Fprintln(os.Stderr, "\nPlease configure your user identity using:")
-		fmt.Fprintln(os.Stderr, "  notgit config --global user.name \"Your Name\"")
-		fmt.Fprintln(os.Stderr, "  notgit config --global user.email \"you@example.com\"")
+		fmt.Fprintln(os.Stderr, "  notgit config set --global user.name \"Your Name\"")
+		fmt.Fprintln(os.Stderr, "  notgit config set --global user.email \"you@example.com\"")
 		os.Exit(1)
 	}
 

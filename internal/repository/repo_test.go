@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Gr1shma/notgit/internal/repository"
+	"github.com/Gr1shma/notgit/internal/utils"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,7 +35,16 @@ func TestCreateRepo(t *testing.T) {
 	require.FileExists(t, headPath)
 	headContent, err := os.ReadFile(headPath)
 	require.NoError(t, err)
-	require.Equal(t, "ref: refs/heads/master\n", string(headContent))
+
+	expectedBranch := "master" // fallback default
+	if cfg, _, err := utils.LoadConfig(true); err == nil {
+		if branchName, err := utils.GetConfigKeyValue(cfg, "init.defaultBranch"); err == nil {
+			expectedBranch = branchName
+		}
+	}
+
+	expectedHeadContent := "ref: refs/heads/" + expectedBranch + "\n"
+	require.Equal(t, expectedHeadContent, string(headContent))
 
 	// Assert: config file exists and is empty
 	configPath := filepath.Join(repoPath, "config")
