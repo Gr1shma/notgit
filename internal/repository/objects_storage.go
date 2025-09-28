@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 
 	"github.com/Gr1shma/notgit/internal/objects"
+	"github.com/Gr1shma/notgit/internal/objects/blob"
+	"github.com/Gr1shma/notgit/internal/objects/commit"
+	"github.com/Gr1shma/notgit/internal/objects/tree"
 )
 
 func (r *Repository) StoreObject(obj objects.Object) (string, error) {
@@ -35,4 +38,42 @@ func (r *Repository) StoreObject(obj objects.Object) (string, error) {
 	}
 
 	return hashStr, nil
+}
+
+func (r *Repository) RetrieveBlob(hash string) (*blob.Blob, error) {
+	data, err := retrieveObject(r.NotgitDir, hash)
+	if err != nil {
+		return nil, err
+	}
+
+	return blob.DeserializeBlob(data)
+}
+
+func (r *Repository) RetrieveTree(hash string) (*tree.Tree, error) {
+	data, err := retrieveObject(r.NotgitDir, hash)
+	if err != nil {
+		return nil, err
+	}
+
+	return tree.DeserializeTree(data)
+}
+
+func (r *Repository) RetrieveCommit(hash string) (*commit.Commit, error) {
+	data, err := retrieveObject(r.NotgitDir, hash)
+	if err != nil {
+		return nil, err
+	}
+
+	return commit.DeserializeCommit(data)
+}
+
+func retrieveObject(repoPath, hash string) ([]byte, error) {
+	objectPath := filepath.Join(repoPath, "objects", hash[:2], hash[2:])
+
+	data, err := os.ReadFile(objectPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read object file: %v", err)
+	}
+
+	return data, nil
 }

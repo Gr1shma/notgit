@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Gr1shma/notgit/internal/utils"
 )
@@ -60,4 +61,23 @@ func OpenRepository(startPath string) (*Repository, error) {
 		BaseDir:   repoRoot,
 		NotgitDir: filepath.Join(repoRoot, ".notgit"),
 	}, nil
+}
+
+func (repo *Repository) GetCurrentBranch() (string, error) {
+	headPath := filepath.Join(repo.NotgitDir, "HEAD")
+	headData, err := os.ReadFile(headPath)
+	if err != nil {
+		return "", err
+	}
+	headContent := strings.TrimSpace(string(headData))
+
+	if branch, ok := strings.CutPrefix(headContent, "ref: refs/heads/"); ok {
+		return branch, nil
+	}
+
+	if len(headContent) == 40 {
+		return headContent[:7], nil // show short SHA
+	}
+
+	return "unknown", nil
 }

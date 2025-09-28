@@ -45,6 +45,10 @@ func TestStoreBlobObject(t *testing.T) {
 	storedData, err := os.ReadFile(objPath)
 	require.NoError(t, err)
 	require.Equal(t, serialized, storedData, "stored object data must match serialized")
+
+	retrievedBlob, err := repo.RetrieveBlob(hashStr)
+	require.NoError(t, err)
+	require.Equal(t, bl.Content, retrievedBlob.Content, "retrieved blob content should match original")
 }
 
 func TestStoreTreeObject(t *testing.T) {
@@ -84,6 +88,16 @@ func TestStoreTreeObject(t *testing.T) {
 	objPath := filepath.Join(repo.NotgitDir, "objects", hash[:2], hash[2:])
 	_, err = os.Stat(objPath)
 	require.NoError(t, err)
+
+	retrievedTree, err := repo.RetrieveTree(hash)
+	require.NoError(t, err)
+	require.Len(t, retrievedTree.Entries, len(entries), "retrieved tree should have same number of entries")
+	
+	for i, entry := range entries {
+		require.Equal(t, entry.Name, retrievedTree.Entries[i].Name, "entry name should match")
+		require.Equal(t, entry.Hash, retrievedTree.Entries[i].Hash, "entry hash should match")
+		require.Equal(t, entry.Type, retrievedTree.Entries[i].Type, "entry type should match")
+	}
 }
 
 func TestStoreCommitObject(t *testing.T) {
@@ -122,4 +136,14 @@ func TestStoreCommitObject(t *testing.T) {
 	objPath := filepath.Join(repo.NotgitDir, "objects", hash[:2], hash[2:])
 	_, err = os.Stat(objPath)
 	require.NoError(t, err)
+
+	retrievedCommit, err := repo.RetrieveCommit(hash)
+	require.NoError(t, err)
+	require.Equal(t, c.TreeHash, retrievedCommit.TreeHash, "tree hash should match")
+	require.Equal(t, c.Message, retrievedCommit.Message, "commit message should match")
+	require.Equal(t, c.Author.Name, retrievedCommit.Author.Name, "author name should match")
+	require.Equal(t, c.Author.Email, retrievedCommit.Author.Email, "author email should match")
+	require.Equal(t, c.Committer.Name, retrievedCommit.Committer.Name, "committer name should match")
+	require.Equal(t, c.Committer.Email, retrievedCommit.Committer.Email, "committer email should match")
+	require.Equal(t, len(c.ParentHashes), len(retrievedCommit.ParentHashes), "parent hashes length should match")
 }
