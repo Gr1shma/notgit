@@ -53,3 +53,41 @@ func TestCreateRepo(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 0, len(configContent))
 }
+
+func TestRepositoryBranchAndHead(t *testing.T) {
+	tmp := t.TempDir()
+	repo := &repository.Repository{NotgitDir: tmp}
+
+	// HEAD pointing to a branch
+	headPath := filepath.Join(tmp, "HEAD")
+	err := os.WriteFile(headPath, []byte("ref: refs/heads/main\n"), 0o644)
+	require.NoError(t, err)
+
+	branchName, err := repo.GetCurrentBranch()
+	require.NoError(t, err)
+	require.Equal(t, "main", branchName)
+
+	// Create branch ref with fake commit hash
+	fakeHash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	refPath := filepath.Join(tmp, "refs", "heads", branchName)
+	require.NoError(t, os.MkdirAll(filepath.Dir(refPath), 0o755))
+	err = os.WriteFile(refPath, []byte(fakeHash+"\n"), 0o644)
+	require.NoError(t, err)
+
+	hash, err := repo.GetHEADCommitHash()
+	require.NoError(t, err)
+	require.Equal(t, fakeHash, hash)
+
+	// HEAD detached with direct commit hash
+	detachedHash := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	err = os.WriteFile(headPath, []byte(detachedHash+"\n"), 0o644)
+	require.NoError(t, err)
+
+	branchName, err = repo.GetCurrentBranch()
+	require.NoError(t, err)
+	require.Equal(t, "", branchName) // detached => no branch
+
+	hash, err = repo.GetHEADCommitHash()
+	require.NoError(t, err)
+	require.Equal(t, detachedHash, hash)
+}

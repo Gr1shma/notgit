@@ -75,9 +75,29 @@ func (repo *Repository) GetCurrentBranch() (string, error) {
 		return branch, nil
 	}
 
-	if len(headContent) == 40 {
-		return headContent[:7], nil // show short SHA
+	return "", nil
+}
+
+func (repo *Repository) GetHEADCommitHash() (string, error) {
+	headPath := filepath.Join(repo.NotgitDir, "HEAD")
+	headContent, err := os.ReadFile(headPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read HEAD file: %w", err)
 	}
 
-	return "unknown", nil
+	ref := strings.TrimSpace(string(headContent))
+	if refPath, found := strings.CutPrefix(ref, "ref: "); found {
+		fullRefPath := filepath.Join(repo.NotgitDir, refPath)
+		commitHash, err := os.ReadFile(fullRefPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return "", nil
+			}
+			return "", fmt.Errorf("failed to read ref file: %w", err)
+		}
+		return strings.TrimSpace(string(commitHash)), nil
+
+	}
+
+	return ref, nil
 }
