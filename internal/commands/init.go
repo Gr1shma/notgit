@@ -22,7 +22,7 @@ var initCmd = &cobra.Command{
 	Long:  `Initialize a new notgit repository in the current directory by creating the necessary metadata and configuration files.`,
 
 	Args: cobra.MaximumNArgs(1),
-	Run:  initCallback,
+	RunE: initCallback,
 }
 
 func init() {
@@ -30,7 +30,7 @@ func init() {
 	rootCmd.AddCommand(initCmd)
 }
 
-func initCallback(cmd *cobra.Command, args []string) {
+func initCallback(cmd *cobra.Command, args []string) error {
 	initArgs.directory = "."
 	if len(args) == 1 {
 		initArgs.directory = args[0]
@@ -38,33 +38,30 @@ func initCallback(cmd *cobra.Command, args []string) {
 
 	absPath, err := filepath.Abs(initArgs.directory)
 	if err != nil {
-		fmt.Printf("Error while getting the absolute path: %v\n", err)
-		return
+		return fmt.Errorf("error while getting the absolute path: %w", err)
+
 	}
 
 	pathStat, err := os.Stat(absPath)
 	if os.IsNotExist(err) {
 		if err := os.MkdirAll(absPath, 0755); err != nil {
-			fmt.Printf("Error creating directory: %v\n", err)
-			return
+			return fmt.Errorf("error creating directory: %w", err)
 		}
 		if !initArgs.quietMode {
-			fmt.Printf("Created directory: %s\n", absPath)
+			fmt.Fprintf(cmd.OutOrStdout(), "Created directory: %s\n", absPath)
 		}
 	} else if err != nil {
-		fmt.Printf("Error accessing path: %v\n", err)
-		return
+		return fmt.Errorf("error accessing path: %w", err)
 	} else if !pathStat.IsDir() {
-		fmt.Printf("Path exists but is not a directory: %s\n", absPath)
-		return
+		return fmt.Errorf("path exists but is not a directory: %s\n", absPath)
 	}
 
 	if err := repository.CreateRepo(absPath); err != nil {
-		fmt.Printf("Error while creating the repo: %v\n", err)
-		return
+		return fmt.Errorf("error creating the repo: %w", err)
 	}
 
 	if !initArgs.quietMode {
-		fmt.Printf("Initialized empty notgit repository in %s/.notgit\n", absPath)
+		fmt.Fprintf(cmd.OutOrStdout(), "Initialized empty notgit repository in %s/.notgit\n", absPath)
 	}
+	return nil
 }

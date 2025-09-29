@@ -54,26 +54,26 @@ var statusCmd = &cobra.Command{
 	Long: `Show the status of files in the working directory and staging area.
 This command shows which files have been modified, added, deleted, or are untracked.`,
 	Args: cobra.NoArgs,
-	Run:  statusCallback,
+	RunE: statusCallback,
 }
 
 func init() {
 	rootCmd.AddCommand(statusCmd)
 }
 
-func statusCallback(cmd *cobra.Command, args []string) {
+func statusCallback(cmd *cobra.Command, args []string) error {
 	repo, err := repository.OpenRepository(".")
 	if err != nil {
-		fmt.Printf("Error: not inside a notgit repository: %v\n", err)
-		return
+		return fmt.Errorf("not inside a notgit repository: %w", err)
 	}
 
 	status, err := getRepositoryStatus(repo)
 	if err != nil {
-		fmt.Printf("Error: getting repository status: %v\n", err)
-		return
+		return fmt.Errorf("error while getting repository status: %w", err)
 	}
-	printStatus(status)
+
+	printStatus(cmd, status)
+	return nil
 }
 
 func getRepositoryStatus(repo *repository.Repository) (*RepositoryStatus, error) {
@@ -319,46 +319,44 @@ func buildCompleteStatusEntries(headTree map[string]string, indexFiles map[strin
 	return entries, untracked
 }
 
-func printStatus(status *RepositoryStatus) {
-	fmt.Printf("On branch %s\n", status.Branch)
+func printStatus(cmd *cobra.Command, status *RepositoryStatus) {
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "On branch %s\n", status.Branch)
 
 	if !status.HasChanges {
-		fmt.Println("nothing to commit, working tree clean")
+		fmt.Fprintf(out, "nothing to commit, working tree clean")
 		return
 	}
 
 	stagedEntries := getStagedEntries(status.Entries)
 	if len(stagedEntries) > 0 {
-		fmt.Println("\nChanges to be committed:")
-		fmt.Println("  (use \"notgit reset HEAD <file>...\" to unstage)")
-		fmt.Println()
+		fmt.Fprintf(out, "\nChanges to be committed:")
+		fmt.Fprintf(out, "  (use \"notgit reset HEAD <file>...\" to unstage)\n")
 		for _, entry := range stagedEntries {
-			fmt.Printf("  %s: %s\n", getStatusString(entry.IndexStatus), entry.Path)
+			fmt.Fprintf(out, "  %s: %s\n", getStatusString(entry.IndexStatus), entry.Path)
 		}
 	}
 
 	unstagedEntries := getUnstagedEntries(status.Entries)
 	if len(unstagedEntries) > 0 {
-		fmt.Println("\nChanges not staged for commit:")
-		fmt.Println("  (use \"notgit add <file>...\" to update what will be committed)")
-		fmt.Println("  (use \"notgit checkout -- <file>...\" to discard changes in working directory)")
-		fmt.Println()
+		fmt.Fprintf(out, "\nChanges not staged for commit:")
+		fmt.Fprintf(out, "  (use \"notgit add <file>...\" to update what will be committed)")
+		fmt.Fprintf(out, "  (use \"notgit checkout -- <file>...\" to discard changes in working directory)\n")
 		for _, entry := range unstagedEntries {
-			fmt.Printf("  %s: %s\n", getStatusString(entry.WorkingStatus), entry.Path)
+			fmt.Fprintf(out, "  %s: %s\n", getStatusString(entry.WorkingStatus), entry.Path)
 		}
 	}
 
 	if len(status.UntrackedFiles) > 0 {
-		fmt.Println("\nUntracked files:")
-		fmt.Println("  (use \"notgit add <file>...\" to include in what will be committed)")
-		fmt.Println()
+		fmt.Fprintf(out, "\nUntracked files:")
+		fmt.Fprintf(out, "  (use \"notgit add <file>...\" to include in what will be committed)\n")
 		for _, file := range status.UntrackedFiles {
-			fmt.Printf("  %s\n", file)
+			fmt.Fprintf(out, "  %s\n", file)
 		}
 	}
 
 	if len(stagedEntries) == 0 && (len(unstagedEntries) > 0 || len(status.UntrackedFiles) > 0) {
-		fmt.Println("\nno changes added to commit (use \"notgit add\" and/or \"notgit commit -a\")")
+		fmt.Fprintf(out, "\nno changes added to commit (use \"notgit add\" and/or \"notgit commit -a\")")
 	}
 }
 
