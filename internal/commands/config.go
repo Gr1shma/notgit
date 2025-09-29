@@ -9,7 +9,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var globalConfigFlag bool
+var (
+	globalConfigFlag bool
+)
 
 var configCmd = &cobra.Command{
 	Use:   "config",
@@ -21,35 +23,35 @@ var configGetCmd = &cobra.Command{
 	Use:   "get <key>",
 	Short: "Get a configuration value",
 	Args:  cobra.ExactArgs(1),
-	Run:   getConfigCallback,
+	RunE:  getConfigCallback,
 }
 
 var configSetCmd = &cobra.Command{
 	Use:   "set <key> <value>",
 	Short: "Set a configuration value",
 	Args:  cobra.ExactArgs(2),
-	Run:   setConfigCallback,
+	RunE:  setConfigCallback,
 }
 
 var configUnsetCmd = &cobra.Command{
 	Use:   "unset <key> [<key>...]",
 	Short: "Remove one or more configuration values",
 	Args:  cobra.MinimumNArgs(1),
-	Run:   unsetConfigCallback,
+	RunE:  unsetConfigCallback,
 }
 
 var configListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all configuration values",
 	Args:  cobra.NoArgs,
-	Run:   listConfigCallback,
+	RunE:  listConfigCallback,
 }
 
 var configEditCmd = &cobra.Command{
 	Use:   "edit",
 	Short: "Open the config file in the editor",
 	Args:  cobra.NoArgs,
-	Run:   editConfigCallback,
+	RunE:  editConfigCallback,
 }
 
 func init() {
@@ -68,90 +70,89 @@ func init() {
 	rootCmd.AddCommand(configCmd)
 }
 
-func getConfigCallback(cmd *cobra.Command, args []string) {
+func getConfigCallback(cmd *cobra.Command, args []string) error {
 	key := args[0]
 
 	cfg, _, err := utils.LoadConfig(globalConfigFlag)
 	if err != nil {
-		fmt.Printf("Error loading config: %v\n", err)
-		return
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 
 	val, err := utils.GetConfigKeyValue(cfg, key)
 	if err != nil {
-		fmt.Println(err)
-		return
+		return fmt.Errorf("key not found: %w", err)
 	}
 
-	fmt.Println(val)
-
+	fmt.Fprintln(cmd.OutOrStdout(), val)
+	return nil
 }
 
-func setConfigCallback(cmd *cobra.Command, args []string) {
+func setConfigCallback(cmd *cobra.Command, args []string) error {
 	key := args[0]
 	value := args[1]
 
 	cfg, path, err := utils.LoadConfig(globalConfigFlag)
 	if err != nil {
-		fmt.Printf("Error loading config: %v\n", err)
-		return
+		return fmt.Errorf("failed loading config: %w", err)
 	}
 
 	err = utils.SetConfigKeyValue(cfg, path, key, value)
 	if err != nil {
-		fmt.Printf("Error setting config: %v\n", err)
-		return
+		return fmt.Errorf("failed to set config key: %w", err)
 	}
 
 	if err := cfg.SaveTo(path); err != nil {
-		fmt.Printf("Failed to save config: %v\n", err)
-		return
+		return fmt.Errorf("failed to save config: %w", err)
 	}
 
-	fmt.Printf("Set %s = %s\n", key, value)
+	fmt.Fprintf(cmd.OutOrStdout(), "Set %s = %s\n", key, value)
+	return nil
 }
 
-func unsetConfigCallback(cmd *cobra.Command, args []string) {
+func unsetConfigCallback(cmd *cobra.Command, args []string) error {
 	cfg, path, err := utils.LoadConfig(globalConfigFlag)
 	if err != nil {
-		fmt.Printf("Error loading config: %v\n", err)
-		return
+		return fmt.Errorf("Error loading config: %w", err)
+
 	}
 
 	var anyUnset bool
 	for _, key := range args {
-		keySetUnsetBool, err := utils.UnsetConfigKey(cfg, path, key)
+		unset, err := utils.UnsetConfigKey(cfg, path, key)
 		if err != nil {
-			fmt.Printf("Error unsetting key %s: %v\n", key, err)
+			fmt.Fprintf(cmd.ErrOrStderr(), "error unsetting key %s: %v\n", key, err)
 			continue
 		}
-		fmt.Printf("Unset key: %s\n", key)
-		anyUnset = keySetUnsetBool
+		if unset {
+			fmt.Fprintf(cmd.OutOrStdout(), "Unset key: %s\n", key)
+			anyUnset = true
+		}
 	}
 
 	if anyUnset {
 		if err := cfg.SaveTo(path); err != nil {
-			fmt.Printf("Failed to save config: %v\n", err)
+			return fmt.Errorf("failed to save config: %w", err)
 		}
 	}
+
+	return nil
 }
 
-func listConfigCallback(cmd *cobra.Command, args []string) {
+func listConfigCallback(cmd *cobra.Command, args []string) error {
 	cfg, path, err := utils.LoadConfig(globalConfigFlag)
 	if err != nil {
-		fmt.Printf("Error loading config: %v\n", err)
-		return
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	fmt.Printf("Listing configuration from: %s\n\n", path)
+	fmt.Fprintf(cmd.OutOrStdout(), "Listing configuration from: %s\n\n", path)
 	utils.PrintAllConfig(cfg)
+	return nil
 }
 
-func editConfigCallback(cmd *cobra.Command, args []string) {
+func editConfigCallback(cmd *cobra.Command, args []string) error {
 	cfg, configPath, err := utils.LoadConfig(globalConfigFlag)
 	if err != nil {
-		fmt.Printf("Error loading config: %v\n", err)
-		return
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 
 	editor, err := utils.GetConfigKeyValue(cfg, "core.editor")
@@ -160,8 +161,8 @@ func editConfigCallback(cmd *cobra.Command, args []string) {
 	}
 
 	if editor == "" {
-		fmt.Println("No editor configured. Set core.editor or $EDITOR environment variable.")
-		return
+		fmt.Fprintln(cmd.ErrOrStderr(), "No editor configured. Set core.editor or $EDITOR environment variable.")
+		return nil
 	}
 
 	tryEditor := func(ed string) error {
@@ -177,10 +178,11 @@ func editConfigCallback(cmd *cobra.Command, args []string) {
 		if fallbackEditor != "" && fallbackEditor != editor {
 			fmt.Printf("Failed to open editor %q, falling back to $EDITOR=%q\n", editor, fallbackEditor)
 			if err := tryEditor(fallbackEditor); err != nil {
-				fmt.Printf("Failed to open fallback editor: %v\n", err)
+				return fmt.Errorf("failed to open fallback editor: %w", err)
 			}
 		} else {
-			fmt.Printf("Failed to open editor: %v\n", err)
+			return fmt.Errorf("failed to open editor %q: %w", editor, err)
 		}
 	}
+	return nil
 }
