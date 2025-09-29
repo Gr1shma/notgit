@@ -112,7 +112,7 @@ func createBranch(repo *repository.Repository, branchName string) error {
 		return fmt.Errorf("branch '%s' already exists", branchName)
 	}
 
-	headCommitHash, err := getHEADCommitHash(repo)
+	headCommitHash, err := repo.GetHEADCommitHash()
 	if err != nil {
 		return fmt.Errorf("failed to get HEAD commit hash: %w", err)
 	}
@@ -132,30 +132,6 @@ func createBranch(repo *repository.Repository, branchName string) error {
 
 	fmt.Printf("Created branch '%s'\n", branchName)
 	return nil
-}
-
-func getHEADCommitHash(repo *repository.Repository) (string, error) {
-	headPath := filepath.Join(repo.NotgitDir, "HEAD")
-	headContent, err := os.ReadFile(headPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to read HEAD file: %w", err)
-	}
-
-	ref := strings.TrimSpace(string(headContent))
-	if refPath, found := strings.CutPrefix(ref, "ref: "); found {
-		fullRefPath := filepath.Join(repo.NotgitDir, refPath)
-		commitHash, err := os.ReadFile(fullRefPath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return "", nil
-			}
-			return "", fmt.Errorf("failed to read ref file: %w", err)
-		}
-		return strings.TrimSpace(string(commitHash)), nil
-
-	}
-
-	return ref, nil
 }
 
 func deleteBranchByName(repo *repository.Repository, name string) error {

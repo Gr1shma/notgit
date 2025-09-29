@@ -3,8 +3,6 @@ package commands
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/Gr1shma/notgit/internal/objects/commit"
@@ -21,7 +19,7 @@ var commitCmd = &cobra.Command{
 	Short: "Record changes to the repository",
 	Long: `Stores the current contents of the index in a new commit object.
 A commit message is required to describe the changes being recorded.`,
-	Run: commitCallback,
+	RunE: commitCallback,
 }
 
 func init() {
@@ -30,43 +28,29 @@ func init() {
 	rootCmd.AddCommand(commitCmd)
 }
 
-func commitCallback(cmd *cobra.Command, args []string) {
-	repoRoot, err := utils.FindRepoRoot(".")
+func commitCallback(cmd *cobra.Command, args []string) error {
+	repo, err := repository.OpenRepository(".")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "fatal: not a notgit repository (or any of the parent directories): .notgit")
-		os.Exit(1)
+		return fmt.Errorf("error while getting notgit repository: %w", err)
 	}
 
 	authorName, authorEmail, err := getUserIdentity()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		fmt.Fprintln(os.Stderr, "\nPlease configure your user identity using:")
-		fmt.Fprintln(os.Stderr, "  notgit config set --global user.name \"Your Name\"")
-		fmt.Fprintln(os.Stderr, "  notgit config set --global user.email \"you@example.com\"")
-		os.Exit(1)
-	}
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Printf("error while getting current working directory: %v", err)
-		return
-	}
-
-	repo, err := repository.OpenRepository(cwd)
-	if err != nil {
-		fmt.Printf("error while getting notgit repository: %v", err)
-		return
+		fmt.Fprintln(cmd.ErrOrStderr(), err)
+		fmt.Fprintln(cmd.ErrOrStderr(), "\nPlease configure your user identity using:")
+		fmt.Fprintln(cmd.ErrOrStderr(), "  notgit config set --global user.name \"Your Name\"")
+		fmt.Fprintln(cmd.ErrOrStderr(), "  notgit config set --global user.email \"you@example.com\"")
+		return fmt.Errorf("user identity not configured")
 	}
 
 	idx, err := repo.LoadIndex()
 	if err != nil {
-		fmt.Printf("error while getting index from the repository: %v", err)
-		return
+		return fmt.Errorf("error while getting index from the repository: %w", err)
 	}
 
 	if len(idx.Entries) == 0 {
-		fmt.Println("Nothing to commit, working tree clean")
-		return
+		fmt.Fprintln(cmd.OutOrStdout(), "Nothing to commit, working tree clean")
+		return nil
 	}
 
 	commitTree := tree.NewTree()
@@ -74,18 +58,19 @@ func commitCallback(cmd *cobra.Command, args []string) {
 		commitTree.AddEntry(path, entry.Hash, tree.EntryTypeBlob)
 	}
 	if err := commitTree.ComputeHash(); err != nil {
-		fmt.Fprintf(os.Stderr, "fatal: failed to compute tree hash: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("fatal: failed to compute tree hash: %w", err)
 	}
 	treeSHA := commitTree.GetHash()
 
 	_, err = repo.StoreObject(commitTree)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "fatal: failed to write tree object: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("fatal: failed to write tree object: %w", err)
 	}
 
-	parentSHA, _ := getParentCommit(repoRoot)
+	parentSHA, err := repo.GetHEADCommitHash()
+	if err != nil {
+		return fmt.Errorf("failed to read HEAD commit hash: %w", err)
+	}
 
 	now := time.Now()
 	authorSig := commit.Signature{
@@ -109,22 +94,27 @@ func commitCallback(cmd *cobra.Command, args []string) {
 
 	_, err = repo.StoreObject(commitObj)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "fatal: failed to write commit object: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("fatal: failed to write commit object: %w\n", err)
 	}
 
-	if err := updateHead(repoRoot, commitSHA); err != nil {
-		fmt.Fprintf(os.Stderr, "fatal: failed to update HEAD: %v\n", err)
-		os.Exit(1)
+	if err := repo.UpdateHEAD(commitSHA); err != nil {
+		return fmt.Errorf("failed to update HEAD: %w", err)
 	}
 
 	if parentSHA == "" {
 		fmt.Printf("[root-commit %s] %s\n", commitSHA[:7], commitMessageString)
 	} else {
-		headRef, _ := readHeadRef(repoRoot)
-		branchName := strings.TrimPrefix(headRef, "refs/heads/")
-		fmt.Printf("[%s %s] %s\n", branchName, commitSHA[:7], commitMessageString)
+		branchName, err := repo.GetCurrentBranch()
+		if err != nil {
+			return fmt.Errorf("failed to get current branch")
+		}
+		if branchName == "" {
+			fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s\n", commitSHA[:7], commitMessageString) // detached HEAD
+		} else {
+			fmt.Fprintf(cmd.OutOrStdout(), "[%s %s] %s\n", branchName, commitSHA[:7], commitMessageString)
+		}
 	}
+	return nil
 }
 
 func getUserIdentity() (name, email string, err error) {
@@ -150,42 +140,4 @@ func getUserIdentity() (name, email string, err error) {
 		return "", "", fmt.Errorf("fatal: user identity not set")
 	}
 	return name, email, nil
-}
-
-func readHeadRef(repoRoot string) (string, error) {
-	headPath := filepath.Join(repoRoot, ".notgit", "HEAD")
-	content, err := os.ReadFile(headPath)
-	if err != nil {
-		return "", err
-	}
-	ref := strings.TrimSpace(string(content))
-	if !strings.HasPrefix(ref, "ref: ") {
-		return "", fmt.Errorf("invalid HEAD content: %s", ref)
-	}
-	return strings.TrimPrefix(ref, "ref: "), nil
-}
-
-func getParentCommit(repoRoot string) (string, error) {
-	refPath, err := readHeadRef(repoRoot)
-	if err != nil {
-		return "", err
-	}
-
-	parentSHABytes, err := os.ReadFile(filepath.Join(repoRoot, ".notgit", refPath))
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(parentSHABytes)), nil
-}
-
-func updateHead(repoRoot, commitSHA string) error {
-	refPath, err := readHeadRef(repoRoot)
-	if err != nil {
-		return err
-	}
-	fullRefPath := filepath.Join(repoRoot, ".notgit", refPath)
-	if err := os.MkdirAll(filepath.Dir(fullRefPath), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(fullRefPath, []byte(commitSHA+"\n"), 0o644)
 }

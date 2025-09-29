@@ -101,3 +101,23 @@ func (repo *Repository) GetHEADCommitHash() (string, error) {
 
 	return ref, nil
 }
+
+func (repo *Repository) UpdateHEAD(commitSHA string) error {
+	headPath := filepath.Join(repo.NotgitDir, "HEAD")
+	headContent, err := os.ReadFile(headPath)
+	if err != nil {
+		return fmt.Errorf("failed to read HEAD: %w", err)
+	}
+
+	headStr := strings.TrimSpace(string(headContent))
+
+	if refPath, ok := strings.CutPrefix(headStr, "ref: "); ok {
+		fullRefPath := filepath.Join(repo.NotgitDir, refPath)
+		if err := os.MkdirAll(filepath.Dir(fullRefPath), 0o755); err != nil {
+			return fmt.Errorf("failed to create ref dir: %w", err)
+		}
+		return os.WriteFile(fullRefPath, []byte(commitSHA+"\n"), 0o644)
+	}
+
+	return os.WriteFile(headPath, []byte(commitSHA+"\n"), 0o644)
+}

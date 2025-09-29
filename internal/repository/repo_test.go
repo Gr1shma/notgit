@@ -91,3 +91,44 @@ func TestRepositoryBranchAndHead(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, detachedHash, hash)
 }
+
+func TestUpdateHEAD(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Initialize a fake repo
+	repo := &repository.Repository{NotgitDir: tmp}
+
+	// Create HEAD pointing to branch "main"
+	headPath := filepath.Join(tmp, "HEAD")
+	branchName := "main"
+	refPath := filepath.Join("refs", "heads", branchName)
+	err := os.MkdirAll(filepath.Join(tmp, "refs", "heads"), 0o755)
+	require.NoError(t, err)
+
+	err = os.WriteFile(headPath, []byte("ref: "+refPath+"\n"), 0o644)
+	require.NoError(t, err)
+
+	// Write commit SHA to branch
+	commitSHA := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	err = repo.UpdateHEAD(commitSHA)
+	require.NoError(t, err)
+
+	// Check that the branch ref file contains the commit SHA
+	branchRefFullPath := filepath.Join(tmp, refPath)
+	data, err := os.ReadFile(branchRefFullPath)
+	require.NoError(t, err)
+	require.Equal(t, commitSHA+"\n", string(data))
+
+	// Now test detached HEAD
+	detachedSHA := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	err = os.WriteFile(headPath, []byte("detached-content\n"), 0o644)
+	require.NoError(t, err)
+
+	err = repo.UpdateHEAD(detachedSHA)
+	require.NoError(t, err)
+
+	// HEAD file itself should now contain the detached SHA
+	data, err = os.ReadFile(headPath)
+	require.NoError(t, err)
+	require.Equal(t, detachedSHA+"\n", string(data))
+}
