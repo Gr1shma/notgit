@@ -21,18 +21,13 @@ const (
 	StatusModified
 	StatusAdded
 	StatusDeleted
-	StatusRenamed
-	StatusCopied
-	StatusUnmerged
-	StatusUntracked
-	StatusIgnored
 )
 
 type StatusEntry struct {
 	Path          string
 	IndexStatus   FileStatus
 	WorkingStatus FileStatus
-	OriginalPath  string // for renames
+	OriginalPath  string // for renames -> TODO: implement it
 }
 
 type RepositoryStatus struct {
@@ -86,26 +81,32 @@ func getRepositoryStatus(repo *repository.Repository) (*RepositoryStatus, error)
 		Repository: repo,
 	}
 
-	repoCurrentBranch, err := getBranch(repo)
+	repoCurrentBranch, err := repo.GetCurrentBranch()
 	if err != nil {
-		fmt.Printf("Error: getting current branch: %v\n", err)
-	} else {
-		repoStatus.Branch = repoCurrentBranch
+		return nil, fmt.Errorf("error: getting current branch: %v", err)
+	}
+	repoStatus.Branch = repoCurrentBranch
+
+	latestCommitTree, err := getLatestCommitTree(repo)
+	if err != nil {
+		return nil, fmt.Errorf("error: getting latest commit tree: %v", err)
 	}
 
 	indexFiles, err := getIndexFiles(repo)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read index: %w", err)
+		return nil, fmt.Errorf("error: getting index files: %v", err)
 	}
 
 	workingFiles, err := getWorkingDirectoryFiles(repo)
 	if err != nil {
-		return nil, fmt.Errorf("failed to scan working directory: %w", err)
+		return nil, fmt.Errorf("error: getting working directory files: %v", err)
 	}
 
-	repoStatus.Entries = buildStatusEntries(indexFiles, workingFiles)
-	repoStatus.UntrackedFiles = getUntrackedFiles(indexFiles, workingFiles)
-	for _, entry := range repoStatus.Entries {
+	entries, untracked := buildCompleteStatusEntries(latestCommitTree, indexFiles, workingFiles)
+	repoStatus.Entries = entries
+	repoStatus.UntrackedFiles = untracked
+
+	for _, entry := range entries {
 		if entry.IndexStatus != StatusUnmodified {
 			repoStatus.StagedChanges++
 		}
@@ -119,23 +120,48 @@ func getRepositoryStatus(repo *repository.Repository) (*RepositoryStatus, error)
 	return repoStatus, nil
 }
 
-func getBranch(repo *repository.Repository) (string, error) {
+func getLatestCommitTree(repo *repository.Repository) (map[string]string, error) {
 	headPath := filepath.Join(repo.NotgitDir, "HEAD")
-	headData, err := os.ReadFile(headPath)
+	headContent, err := os.ReadFile(headPath)
 	if err != nil {
-		return "", err
-	}
-	headContent := strings.TrimSpace(string(headData))
-
-	if branch, ok := strings.CutPrefix(headContent, "ref: refs/heads/"); ok {
-		return branch, nil
+		return nil, fmt.Errorf("error while reading the HEAD file")
 	}
 
-	if len(headContent) == 40 {
-		return headContent[:7], nil // show short SHA
+	ref := strings.TrimSpace(string(headContent))
+	var commitHash string
+	if strings.HasPrefix(ref, "ref: ") {
+		refPath := filepath.Join(repo.NotgitDir, strings.TrimPrefix(ref, "ref: "))
+		commitHashBytes, err := os.ReadFile(refPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return make(map[string]string), nil
+			}
+			return nil, fmt.Errorf("failed to read ref file: %v", err)
+		}
+		commitHash = strings.TrimSpace(string(commitHashBytes))
+	} else {
+		commitHash = ref
+	}
+	if commitHash == "" {
+		return make(map[string]string), nil
 	}
 
-	return "unknown", nil
+	commit, err := repo.RetrieveCommit(commitHash)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve commit: %v", err)
+	}
+
+	tree, err := repo.RetrieveTree(commit.TreeHash)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve tree: %v", err)
+	}
+
+	treeFiles := make(map[string]string)
+	for _, entry := range tree.Entries {
+		treeFiles[entry.Name] = entry.Hash
+	}
+
+	return treeFiles, nil
 }
 
 func getIndexFiles(repo *repository.Repository) (map[string]FileInfo, error) {
@@ -208,56 +234,89 @@ func computeFileHash(path string) (string, error) {
 	return hex.EncodeToString(hash[:]), nil
 }
 
-func buildStatusEntries(indexFiles map[string]FileInfo, workingFiles map[string]FileInfo) []StatusEntry {
+func buildCompleteStatusEntries(headTree map[string]string, indexFiles map[string]FileInfo, workingFiles map[string]FileInfo) ([]StatusEntry, []string) {
 	var entries []StatusEntry
+	var untracked []string
 	processedFiles := make(map[string]bool)
 
-	for path, indexFile := range indexFiles {
-		entry := StatusEntry{
-			Path: path,
-		}
-		processedFiles[path] = true
-		if workingFile, exists := workingFiles[path]; exists {
-			if indexFile.Hash != workingFile.Hash {
-				entry.WorkingStatus = StatusModified
+	allPaths := make(map[string]bool)
+	for path := range headTree {
+		allPaths[path] = true
+	}
+	for path := range indexFiles {
+		allPaths[path] = true
+	}
+	for path := range workingFiles {
+		allPaths[path] = true
+	}
+
+	for path := range allPaths {
+		entry := StatusEntry{Path: path}
+
+		headHash, inHead := headTree[path]
+		indexFile, inIndex := indexFiles[path]
+		workingFile, inWorking := workingFiles[path]
+
+		// Determine index status (HEAD vs Index comparison)
+		if !inHead && inIndex {
+			// New file added to index
+			entry.IndexStatus = StatusAdded
+		} else if inHead && !inIndex {
+			// File deleted from index
+			entry.IndexStatus = StatusDeleted
+		} else if inHead && inIndex {
+			// File exists in both, check if modified
+			if headHash != indexFile.Hash {
+				entry.IndexStatus = StatusModified
+			} else {
+				entry.IndexStatus = StatusUnmodified
 			}
 		} else {
-			entry.WorkingStatus = StatusDeleted
+			// File doesn't exist in HEAD or Index
+			entry.IndexStatus = StatusUnmodified
 		}
 
-		entry.IndexStatus = StatusUnmodified
-
-		entries = append(entries, entry)
-	}
-
-	for path, workingFile := range workingFiles {
-		if processedFiles[path] {
-			continue
-		}
-		if indexFile, exists := indexFiles[path]; exists {
-			if indexFile.Hash != workingFile.Hash {
-				entries = append(entries, StatusEntry{
-					Path:          path,
-					WorkingStatus: StatusModified,
-				})
+		// Determine working status (Index vs Working Directory comparison)
+		if !inIndex && inWorking {
+			// File exists in working dir but not in index
+			if !inHead {
+				// File is completely untracked
+				untracked = append(untracked, path)
+				continue
+			} else {
+				// File was deleted from index but still exists in working dir
+				entry.WorkingStatus = StatusModified
 			}
+		} else if inIndex && !inWorking {
+			// File deleted from working directory
+			entry.WorkingStatus = StatusDeleted
+		} else if inIndex && inWorking {
+			// File exists in both, check if modified
+			if indexFile.Hash != workingFile.Hash {
+				entry.WorkingStatus = StatusModified
+			} else {
+				entry.WorkingStatus = StatusUnmodified
+			}
+		} else {
+			// File doesn't exist in index or working dir
+			entry.WorkingStatus = StatusUnmodified
 		}
+
+		// Only add entry if there are changes
+		if entry.IndexStatus != StatusUnmodified || entry.WorkingStatus != StatusUnmodified {
+			entries = append(entries, entry)
+		}
+
 		processedFiles[path] = true
 	}
-	return entries
-}
 
-func getUntrackedFiles(indexFiles, workingFiles map[string]FileInfo) []string {
-	var untracked []string
-
-	for path := range workingFiles {
-		if _, exists := indexFiles[path]; !exists {
-			untracked = append(untracked, path)
-		}
-	}
-
+	// Sort entries and untracked files
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Path < entries[j].Path
+	})
 	sort.Strings(untracked)
-	return untracked
+
+	return entries, untracked
 }
 
 func printStatus(status *RepositoryStatus) {
@@ -271,6 +330,7 @@ func printStatus(status *RepositoryStatus) {
 	stagedEntries := getStagedEntries(status.Entries)
 	if len(stagedEntries) > 0 {
 		fmt.Println("\nChanges to be committed:")
+		fmt.Println("  (use \"notgit reset HEAD <file>...\" to unstage)")
 		fmt.Println()
 		for _, entry := range stagedEntries {
 			fmt.Printf("  %s: %s\n", getStatusString(entry.IndexStatus), entry.Path)
@@ -280,7 +340,8 @@ func printStatus(status *RepositoryStatus) {
 	unstagedEntries := getUnstagedEntries(status.Entries)
 	if len(unstagedEntries) > 0 {
 		fmt.Println("\nChanges not staged for commit:")
-		fmt.Println("  use \"notgit add <file>\" to update what will be committed")
+		fmt.Println("  (use \"notgit add <file>...\" to update what will be committed)")
+		fmt.Println("  (use \"notgit checkout -- <file>...\" to discard changes in working directory)")
 		fmt.Println()
 		for _, entry := range unstagedEntries {
 			fmt.Printf("  %s: %s\n", getStatusString(entry.WorkingStatus), entry.Path)
@@ -289,18 +350,15 @@ func printStatus(status *RepositoryStatus) {
 
 	if len(status.UntrackedFiles) > 0 {
 		fmt.Println("\nUntracked files:")
-		fmt.Println("  use \"notgit add <file>\" to include in what will be committed")
+		fmt.Println("  (use \"notgit add <file>...\" to include in what will be committed)")
 		fmt.Println()
 		for _, file := range status.UntrackedFiles {
 			fmt.Printf("  %s\n", file)
 		}
 	}
 
-	fmt.Println()
-	if status.StagedChanges == 0 && status.UnstagedChanges == 0 {
-		fmt.Println("no changes added to commit use \"notgit add\"")
-	} else if status.StagedChanges == 0 {
-		fmt.Println("no changes added to commit use \"notgit add\"")
+	if len(stagedEntries) == 0 && (len(unstagedEntries) > 0 || len(status.UntrackedFiles) > 0) {
+		fmt.Println("\nno changes added to commit (use \"notgit add\" and/or \"notgit commit -a\")")
 	}
 }
 
@@ -338,12 +396,6 @@ func getStatusString(status FileStatus) string {
 		return "new file"
 	case StatusDeleted:
 		return "deleted"
-	case StatusRenamed:
-		return "renamed"
-	case StatusCopied:
-		return "copied"
-	case StatusUntracked:
-		return "untracked"
 	default:
 		return "unknown"
 	}
