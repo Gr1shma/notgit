@@ -10,6 +10,7 @@ import (
 	"github.com/Gr1shma/notgit/internal/objects/blob"
 	"github.com/Gr1shma/notgit/internal/objects/commit"
 	"github.com/Gr1shma/notgit/internal/objects/tree"
+	"github.com/Gr1shma/notgit/internal/repository"
 	"github.com/spf13/cobra"
 )
 
@@ -25,7 +26,7 @@ With the -p flag, the content of the object is pretty-printed.
 With the -t flag, show the object type.
 With the -s flag, show the object size.`,
 	Args: cobra.ExactArgs(1),
-	Run:  catFileCallback,
+	RunE: catFileCallback,
 }
 
 func init() {
@@ -35,48 +36,72 @@ func init() {
 	rootCmd.AddCommand(catFileCmd)
 }
 
-func catFileCallback(cmd *cobra.Command, args []string) {
-	objectHash := args[0]
-	if len(objectHash) < 3 {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Invalid object hash: %s\n", objectHash)
-		return
+func catFileCallback(cmd *cobra.Command, args []string) error {
+	objectHash := strings.TrimSpace(args[0])
+	
+	if len(objectHash) < 4 {
+		return fmt.Errorf("invalid object hash: %s (too short)", objectHash)
+	}
+	if len(objectHash) != 40 {
+		return fmt.Errorf("invalid object hash: %s (must be 40 characters)", objectHash)
 	}
 
-	objDir := filepath.Join(".notgit", "objects", objectHash[:2])
+	flagCount := 0
+	if catFilePrettyBool {
+		flagCount++
+	}
+	if catFileTypeBool {
+		flagCount++
+	}
+	if catFileSizeBool {
+		flagCount++
+	}
+	
+	if flagCount > 1 {
+		return fmt.Errorf("only one of -p, -t, or -s can be specified")
+	}
+	
+	repo, err := repository.OpenRepository(".")
+	if err != nil {
+		return fmt.Errorf("failed to open repository: %w", err)
+	}
+
+	objDir := filepath.Join(repo.NotgitDir, "objects", objectHash[:2])
 	objFile := filepath.Join(objDir, objectHash[2:])
 
 	data, err := os.ReadFile(objFile)
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Failed to read object file: %v\n", err)
-		return
+		if os.IsNotExist(err) {
+			return fmt.Errorf("object %s not found", objectHash)
+		}
+		return fmt.Errorf("failed to read object file: %w", err)
 	}
 
 	objectType, content, err := parseObjectHeader(data)
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Failed to parse object: %v\n", err)
-		return
+		return fmt.Errorf("failed to parse object: %w", err)
 	}
 
 	if catFileTypeBool {
-		fmt.Println(objectType)
-		return
+		fmt.Fprintln(cmd.OutOrStdout(), objectType)
+		return nil
 	}
 
 	if catFileSizeBool {
-		fmt.Println(len(content))
-		return
+		fmt.Fprintln(cmd.OutOrStdout(), len(content))
+		return nil
 	}
 
 	if catFilePrettyBool {
-		err := prettyPrintObject(objectType, data)
-		if err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Failed to pretty print object: %v\n", err)
+		if err := prettyPrintObject(cmd, objectType, data); err != nil {
+			return fmt.Errorf("failed to pretty print object: %w", err)
 		}
-		return
+		return nil
 	}
 
-	fmt.Printf("Object type: %s\n", objectType)
-	fmt.Printf("Object size: %d bytes\n", len(content))
+	fmt.Fprintf(cmd.OutOrStdout(), "Object type: %s\n", objectType)
+	fmt.Fprintf(cmd.OutOrStdout(), "Object size: %d bytes\n", len(content))
+	return nil
 }
 
 func parseObjectHeader(data []byte) (string, []byte, error) {
@@ -94,72 +119,87 @@ func parseObjectHeader(data []byte) (string, []byte, error) {
 	}
 
 	objectType := parts[0]
+	
+	switch objectType {
+	case "blob", "tree", "commit":
+	default:
+		return "", nil, fmt.Errorf("unknown object type: %s", objectType)
+	}
+	
 	return objectType, content, nil
 }
 
-func prettyPrintObject(objectType string, data []byte) error {
+func prettyPrintObject(cmd *cobra.Command, objectType string, data []byte) error {
 	switch objectType {
 	case "blob":
-		return prettyPrintBlob(data)
+		return prettyPrintBlob(cmd, data)
 	case "tree":
-		return prettyPrintTree(data)
+		return prettyPrintTree(cmd, data)
 	case "commit":
-		return prettyPrintCommit(data)
+		return prettyPrintCommit(cmd, data)
 	default:
 		return fmt.Errorf("unknown object type: %s", objectType)
 	}
 }
 
-func prettyPrintBlob(data []byte) error {
+func prettyPrintBlob(cmd *cobra.Command, data []byte) error {
 	blobObj, err := blob.DeserializeBlob(data)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to deserialize blob: %w", err)
 	}
-	fmt.Print(string(blobObj.Content))
+	
+	_, err = cmd.OutOrStdout().Write(blobObj.Content)
+	if err != nil {
+		return fmt.Errorf("failed to write blob content: %w", err)
+	}
 	return nil
 }
 
-func prettyPrintTree(data []byte) error {
+func prettyPrintTree(cmd *cobra.Command, data []byte) error {
 	treeObj, err := tree.DeserializeTree(data)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to deserialize tree: %w", err)
+	}
+
+	if len(treeObj.Entries) == 0 {
+		return nil // Empty tree, nothing to print
 	}
 
 	for _, entry := range treeObj.Entries {
 		mode := getModeForType(entry.Type)
 		typeStr := getTypeString(entry.Type)
-		fmt.Printf("%s %s %s\t%s\n", mode, typeStr, entry.Hash, entry.Name)
+		fmt.Fprintf(cmd.OutOrStdout(), "%s %s %s\t%s\n", mode, typeStr, entry.Hash, entry.Name)
 	}
 	return nil
 }
 
-func prettyPrintCommit(data []byte) error {
+func prettyPrintCommit(cmd *cobra.Command, data []byte) error {
 	commitObj, err := commit.DeserializeCommit(data)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to deserialize commit: %w", err)
 	}
 
-	fmt.Printf("tree %s\n", commitObj.TreeHash)
+	fmt.Fprintf(cmd.OutOrStdout(), "tree %s\n", commitObj.TreeHash)
 
 	for _, parent := range commitObj.ParentHashes {
-		fmt.Printf("parent %s\n", parent)
+		fmt.Fprintf(cmd.OutOrStdout(), "parent %s\n", parent)
 	}
 
-	fmt.Printf("author %s <%s> %d %s\n",
+	fmt.Fprintf(cmd.OutOrStdout(), "author %s <%s> %d %s\n",
 		commitObj.Author.Name,
 		commitObj.Author.Email,
 		commitObj.Author.Time.Unix(),
 		commitObj.Author.Time.Format("-0700"),
 	)
 
-	fmt.Printf("committer %s <%s> %d %s\n",
+	fmt.Fprintf(cmd.OutOrStdout(), "committer %s <%s> %d %s\n",
 		commitObj.Committer.Name,
 		commitObj.Committer.Email,
 		commitObj.Committer.Time.Unix(),
 		commitObj.Committer.Time.Format("-0700"),
 	)
 
-	fmt.Printf("\n%s\n", commitObj.Message)
+	fmt.Fprintf(cmd.OutOrStdout(), "\n%s\n", commitObj.Message)
 	return nil
 }
 
