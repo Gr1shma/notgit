@@ -55,7 +55,7 @@ func branchCallback(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to delete branch: %w", err)
 		}
 	case len(args) == 1:
-		if err := createBranch(repo, args[0]); err != nil {
+		if err := createBranchFromHEAD(repo, args[0]); err != nil {
 			return fmt.Errorf("failed to create branch: %w", err)
 		}
 	default:
@@ -102,7 +102,7 @@ func listBranches(repo *repository.Repository) error {
 	return nil
 }
 
-func createBranch(repo *repository.Repository, branchName string) error {
+func createBranchFromHEAD(repo *repository.Repository, branchName string) error {
 	if strings.Contains(branchName, "/") {
 		return fmt.Errorf("nested branch names are not supported")
 	}
